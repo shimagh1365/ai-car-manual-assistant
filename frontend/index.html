@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ali & Sons AI Car Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --bg-card: #ffffff;
+      --bg-input: #f1f3f7;
+      --border-subtle: #dde1ee;
+      --accent: #0055a5;
+      --accent-soft: rgba(0, 85, 165, 0.08);
+      --accent-strong: #00407c;
+      --text-main: #111827;
+      --text-muted: #6b7280;
+      --danger: #b91c1c;
+
+      --bubble-user: #0055a5;
+      --bubble-user-text: #ffffff;
+      --bubble-bot: #ffffff;
+      --bubble-bot-border: #e2e8f0;
+      --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.12);
+    }
+
+    body.dark {
+      --bg: #020617;
+      --bg-card: #020617;
+      --bg-input: #020617;
+      --border-subtle: #1f2937;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --accent-strong: #0ea5e9;
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
+
+      --bubble-user: #0ea5e9;
+      --bubble-user-text: #0b1120;
+      --bubble-bot: #020617;
+      --bubble-bot-border: #1f2937;
+      --shadow-soft: 0 22px 55px rgba(0, 0, 0, 0.65);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      background: radial-gradient(circle at top, #e0ecff 0, var(--bg) 45%);
+      color: var(--text-main);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px 12px;
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    body.dark {
+      background: radial-gradient(circle at top, #0f172a 0, #020617 45%);
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 980px;
+      background: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.85),
+        rgba(248, 250, 252, 0.98)
+      );
+      border-radius: 28px;
+      padding: 20px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+    }
+
+    body.dark .app-shell {
+      background: radial-gradient(circle at top left, #020617 0, #020617 60%);
+      border-color: rgba(51, 65, 85, 0.9);
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 4px 4px;
+    }
+
+    .logo-wrap {
+      width: 52px;
+      height: 52px;
+      border-radius: 18px;
+      background: radial-gradient(circle at 20% 0%, #fef3c7 0, #fee2e2 40%, #e0f2fe 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 12px 30px rgba(148, 163, 184, 0.5);
+      overflow: hidden;
+    }
+
+    .logo-wrap img {
+      width: 42px;
+      height: 42px;
+      object-fit: contain;
+      border-radius: 50%;
+    }
+
+    .header-text {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .header-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--accent-strong);
+    }
+
+    .header-subtitle {
+      font-size: 0.86rem;
+      color: var(--text-muted);
+    }
+
+    .header-subtitle span {
+      font-weight: 500;
+      color: var(--accent-strong);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pill strong {
+      font-weight: 600;
+      color: var(--accent-strong);
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      border-radius: 999px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      padding: 2px;
+      transition: background 0.25s, border-color 0.25s;
+    }
+
+    .toggle-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: #ffffff;
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
+      transition: transform 0.25s;
+    }
+
+    body.dark .toggle {
+      background: #0f172a;
+      border-color: #1e293b;
+    }
+
+    body.dark .toggle-thumb {
+      transform: translateX(18px);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr);
+      gap: 14px;
+    }
+
+    @media (min-width: 900px) {
+      .main-grid {
+        grid-template-columns: minmax(0, 7fr) minmax(270px, 4fr);
+      }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border-radius: 22px;
+      padding: 14px 14px 12px;
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 2px;
+    }
+
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title span.badge {
+      font-size: 0.72rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .card-title-note {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.2);
+    }
+
+    .status-dot.offline {
+      background: #eab308;
+      box-shadow: 0 0 0 5px rgba(250, 204, 21, 0.25);
+    }
+
+    .chat-wrapper {
+      flex: 1;
+      min-height: 260px;
+      max-height: 520px;
+      border-radius: 18px;
+      background: radial-gradient(circle at top left, #eef2ff 0, #f9fafb 40%, #ffffff 100%);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      padding: 12px 10px 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    body.dark .chat-wrapper {
+      background: radial-gradient(circle at top, #020617 0, #020617 55%);
+      border-color: #1f2937;
+    }
+
+    .chat-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .chat-empty-hint {
+      margin: auto;
+      text-align: center;
+      max-width: 260px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .chip {
+      font-size: 0.78rem;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--text-muted);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s;
+    }
+
+    .chip:hover {
+      background: rgba(148, 163, 184, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .msg-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .msg-row.user {
+      justify-content: flex-end;
+    }
+
+    .avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      color: var(--accent-strong);
+      flex-shrink: 0;
+    }
+
+    .avatar-bot {
+      background: radial-gradient(circle at 30% 0%, #facc15 0, #f97316 30%, #f97316 55%, #1d4ed8 100%);
+      color: #0b1120;
+      font-weight: 700;
+    }
+
+    .avatar-user {
+      background: linear-gradient(135deg, #0f766e, #22c55e);
+      color: #f9fafb;
+      font-weight: 600;
+    }
+
+    .bubble {
+      max-width: 78%;
+      padding: 8px 11px;
+      border-radius: 14px;
+      font-size: 0.84rem;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    .bubble-user {
+      background: var(--bubble-user);
+      color: var(--bubble-user-text);
+      border-bottom-right-radius: 4px;
+    }
+
+    .bubble-bot {
+      background: var(--bubble-bot);
+      border: 1px solid var(--bubble-bot-border);
+      border-bottom-left-radius: 4px;
+      color: var(--text-main);
+    }
+
+    .bubble small {
+      display: block;
+      font-size: 0.7rem;
+      margin-top: 4px;
+      opacity: 0.7;
+    }
+
+    .bubble-tools {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 3px;
+    }
+
+    .bubble-tools button {
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      padding: 0;
+    }
+
+    .preview-row {
+      padding: 4px 3px 6px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .img-preview {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      border: 1px solid var(--border-subtle);
+      object-fit: cover;
+      background: #0f172a10;
+    }
+
+    .preview-label {
+      font-size: 0.78rem;
+    }
+
+    .preview-remove {
+      border: none;
+      background: transparent;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 0.76rem;
+      margin-left: auto;
+    }
+
+    .input-area {
+      border-radius: 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .input-row-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 4px;
+    }
+
+    .customer-input {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .customer-input label {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    .customer-input input {
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      outline: none;
+      background: #ffffff;
+      color: var(--text-main);
+    }
+
+    body.dark .customer-input input {
+      background: #020617;
+      color: var(--text-main);
+    }
+
+    .select-mini {
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      padding: 4px 8px;
+      font-size: 0.78rem;
+      background: #ffffff;
+      color: var(--text-main);
+      outline: none;
+    }
+
+    body.dark .select-mini {
+      background: #020617;
+      color: var(--text-main);
+    }
+
+    .voice-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .voice-toggle input {
+      accent-color: var(--accent);
+    }
+
+    .input-row-main {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .input-row-main textarea {
+      flex: 1;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      padding: 8px 10px;
+      font-size: 0.86rem;
+      font-family: inherit;
+      resize: none;
+      min-height: 44px;
+      max-height: 100px;
+      outline: none;
+      background: #ffffff;
+      color: var(--text-main);
+    }
+
+    .input-row-main textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.16);
+    }
+
+    body.dark .input-row-main textarea {
+      background: #020617;
+      color: var(--text-main);
+    }
+
+    .input-buttons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.08s, color 0.15s;
+      color: var(--text-muted);
+    }
+
+    .icon-btn:hover {
+      background: rgba(148, 163, 184, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .icon-btn.primary {
+      background: var(--accent);
+      color: #ffffff;
+      width: 40px;
+      height: 34px;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.5);
+    }
+
+    .icon-btn.primary:hover {
+      background: var(--accent-strong);
+    }
+
+    .icon {
+      font-size: 1rem;
+    }
+
+    .side-panel {
+      gap: 10px;
+    }
+
+    .meta-block {
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.02);
+      border: 1px dashed rgba(148, 163, 184, 0.7);
+      padding: 10px 11px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    body.dark .meta-block {
+      background: rgba(15, 23, 42, 0.66);
+      border-color: rgba(148, 163, 184, 0.6);
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .meta-row span.label {
+      color: var(--text-muted);
+    }
+
+    .meta-row span.value {
+      color: var(--accent-strong);
+      font-weight: 500;
+    }
+
+    .small-note {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    .error-banner {
+      margin-top: 6px;
+      border-radius: 10px;
+      padding: 6px 8px;
+      font-size: 0.78rem;
+      color: #b91c1c;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+    }
+
+    body.dark .error-banner {
+      background: rgba(127, 29, 29, 0.4);
+      border-color: #7f1d1d;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.7);
+      border-radius: 999px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="logo-wrap">
+        <img src="owl_logo.jpg" alt="Owl Assistant Logo" />
+      </div>
+      <div class="header-text">
+        <div class="header-title">Ali &amp; Sons AI Car Assistant</div>
+        <div class="header-subtitle">
+          Smart after-sales guidance for <span>service customers</span>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div class="pill">
+          <span class="status-dot" id="statusDot"></span>
+          <span>Backend: <strong id="backendStatusLabel">online</strong></span>
+        </div>
+        <div class="pill">
+          <span>Mode</span>
+          <div class="toggle" id="themeToggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-grid">
+      <!-- LEFT: Chat -->
+      <section class="card">
+        <div class="card-title-row">
+          <div class="card-title">
+            Conversation
+            <span class="badge">Service Advisor Assistant</span>
+          </div>
+          <div class="card-title-note">
+            Ask about lights, noises, warnings &amp; features
+          </div>
+        </div>
+
+        <div class="chat-wrapper">
+          <div class="chip-row">
+            <button class="chip" data-example="My engine warning light is on.">Engine light</button>
+            <button class="chip" data-example="I hear a clicking noise when I turn the steering wheel.">Steering noise</button>
+            <button class="chip" data-example="The AC is blowing warm air, what can I check?">AC issue</button>
+            <button class="chip" data-example="How do I reset the trip computer?">Trip computer</button>
+          </div>
+
+          <div class="chat-scroll" id="chatContainer">
+            <div class="chat-empty-hint" id="emptyHint">
+              👋 Start by entering a <strong>Customer ID</strong> on the right or above,
+              then describe the symptom in simple language. You can also attach a
+              dashboard photo or use the microphone.
+            </div>
+          </div>
+
+          <div id="imagePreviewRow" class="preview-row hidden">
+            <img id="imagePreview" class="img-preview" alt="Preview" />
+            <div class="preview-label">Image attached</div>
+            <button type="button" id="removeImageBtn" class="preview-remove">Remove</button>
+          </div>
+        </div>
+
+        <div class="input-area">
+          <div class="input-row-top">
+            <div class="customer-input">
+              <label for="customerIdInput">Customer ID</label>
+              <input
+                id="customerIdInput"
+                type="text"
+                placeholder="e.g. 0018073857"
+              />
+            </div>
+            <div>
+              <label for="languageSelect" style="font-size:0.74rem;color:var(--text-muted);display:block;margin-bottom:2px;">Language</label>
+              <select id="languageSelect" class="select-mini">
+                <option value="en">English</option>
+                <option value="ar">العربية</option>
+              </select>
+            </div>
+            <label class="voice-toggle">
+              <input type="checkbox" id="voiceReplyToggle" />
+              🔊 Read out answers
+            </label>
+          </div>
+
+          <div class="input-row-main">
+            <textarea
+              id="userMessage"
+              placeholder="Describe the issue, for example: “my engine light is on”"
+            ></textarea>
+            <div class="input-buttons">
+              <input
+                type="file"
+                id="fileInput"
+                accept="image/*"
+                style="display:none"
+              />
+              <button type="button" class="icon-btn" id="attachBtn" title="Attach image">
+                <span class="icon">📎</span>
+              </button>
+
+              <button type="button" class="icon-btn" id="cameraBtn" title="Use camera">
+                <span class="icon">📷</span>
+              </button>
+
+              <button type="button" class="icon-btn" id="micBtn" title="Speak">
+                <span class="icon">🎤</span>
+              </button>
+
+              <button type="button" class="icon-btn primary" id="sendBtn" title="Send">
+                <span class="icon">➤</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="errorBanner" class="error-banner hidden"></div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Context -->
+      <section class="card side-panel">
+        <div class="card-title-row">
+          <div class="card-title">
+            Customer &amp; Vehicle
+            <span class="badge">From Quantum API</span>
+          </div>
+        </div>
+
+        <div class="meta-block" id="customerBlock">
+          <div class="meta-row">
+            <span class="label">Customer</span>
+            <span class="value" id="customerNameLabel">–</span>
+          </div>
+          <div class="meta-row">
+            <span class="label">Customer ID</span>
+            <span class="value" id="customerIdLabel">–</span>
+          </div>
+        </div>
+
+        <div class="meta-block" id="vehicleBlock">
+          <div class="meta-row">
+            <span class="label">Vehicles found</span>
+            <span class="value" id="vehicleCountLabel">–</span>
+          </div>
+          <div class="small-note" id="vehicleDetailsLabel">
+            Vehicles will appear here after you enter a valid Customer ID and send a question.
+          </div>
+        </div>
+
+        <div class="small-note">
+          ℹ️ The assistant first searches your official vehicle manual. If no manual content is
+          found, it will clearly state that it is using a general AI model as a fallback.
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const chatContainer = document.getElementById("chatContainer");
+    const emptyHint = document.getElementById("emptyHint");
+    const userMessageInput = document.getElementById("userMessage");
+    const sendBtn = document.getElementById("sendBtn");
+    const attachBtn = document.getElementById("attachBtn");
+    const cameraBtn = document.getElementById("cameraBtn");
+    const micBtn = document.getElementById("micBtn");
+    const fileInput = document.getElementById("fileInput");
+    const imagePreviewRow = document.getElementById("imagePreviewRow");
+    const imagePreview = document.getElementById("imagePreview");
+    const removeImageBtn = document.getElementById("removeImageBtn");
+    const errorBanner = document.getElementById("errorBanner");
+    const customerIdInput = document.getElementById("customerIdInput");
+    const languageSelect = document.getElementById("languageSelect");
+    const voiceReplyToggle = document.getElementById("voiceReplyToggle");
+    const themeToggle = document.getElementById("themeToggle");
+    const backendStatusLabel = document.getElementById("backendStatusLabel");
+    const statusDot = document.getElementById("statusDot");
+
+    const customerNameLabel = document.getElementById("customerNameLabel");
+    const customerIdLabel = document.getElementById("customerIdLabel");
+    const vehicleCountLabel = document.getElementById("vehicleCountLabel");
+    const vehicleDetailsLabel = document.getElementById("vehicleDetailsLabel");
+
+    const chips = document.querySelectorAll(".chip");
+
+    let attachedFile = null;
+    let isSending = false;
+    let currentCustomerName = "";
+    let currentVehicles = [];
+
+    // Speech recognition
+    let recognition = null;
+    let recognizing = false;
+    if ("webkitSpeechRecognition" in window) {
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        recognizing = true;
+        micBtn.textContent = "🛑";
+      };
+
+      recognition.onerror = () => {
+        recognizing = false;
+        micBtn.textContent = "🎤";
+      };
+
+      recognition.onend = () => {
+        recognizing = false;
+        micBtn.textContent = "🎤";
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        if (userMessageInput.value.trim()) {
+          userMessageInput.value += " " + transcript;
+        } else {
+          userMessageInput.value = transcript;
+        }
+        userMessageInput.focus();
+      };
+    }
+
+    // Text-to-speech helper
+    function speakText(text, lang) {
+      if (!("speechSynthesis" in window)) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang === "ar" ? "ar-SA" : "en-US";
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function scrollChatToBottom() {
+      requestAnimationFrame(() => {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      });
+    }
+
+    function formatTime(date) {
+      const d = date instanceof Date ? date : new Date(date);
+      let h = d.getHours();
+      const m = d.getMinutes().toString().padStart(2, "0");
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12 || 12;
+      return `${h}:${m} ${ampm}`;
+    }
+
+    function addMessageBubble({ text, from, ts }) {
+      if (emptyHint) {
+        emptyHint.classList.add("hidden");
+      }
+
+      const row = document.createElement("div");
+      row.className = "msg-row " + (from === "user" ? "user" : "bot");
+
+      const avatar = document.createElement("div");
+      avatar.className = "avatar " + (from === "user" ? "avatar-user" : "avatar-bot");
+      avatar.textContent = from === "user" ? "You" : "Owl";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + (from === "user" ? "bubble-user" : "bubble-bot");
+
+      const p = document.createElement("div");
+      p.innerText = text;
+
+      const meta = document.createElement("small");
+      meta.textContent = formatTime(ts || new Date());
+
+      bubble.appendChild(p);
+      bubble.appendChild(meta);
+
+      if (from === "bot") {
+        const tools = document.createElement("div");
+        tools.className = "bubble-tools";
+
+        const readBtn = document.createElement("button");
+        readBtn.textContent = "🔊";
+        readBtn.title = "Read this answer";
+        readBtn.addEventListener("click", () => {
+          speakText(text, languageSelect.value);
+        });
+
+        tools.appendChild(readBtn);
+        bubble.appendChild(tools);
+      }
+
+      if (from === "user") {
+        row.appendChild(bubble);
+        row.appendChild(avatar);
+      } else {
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+      }
+
+      chatContainer.appendChild(row);
+      scrollChatToBottom();
+    }
+
+    function setError(msg) {
+      if (!msg) {
+        errorBanner.classList.add("hidden");
+        errorBanner.textContent = "";
+      } else {
+        errorBanner.textContent = msg;
+        errorBanner.classList.remove("hidden");
+      }
+    }
+
+    function setBackendOnline(online) {
+      backendStatusLabel.textContent = online ? "online" : "offline";
+      statusDot.classList.toggle("offline", !online);
+    }
+
+    async function sendMessage() {
+      if (isSending) return;
+      setError("");
+
+      const message = userMessageInput.value.trim();
+      const customerId = customerIdInput.value.trim();
+      const language = languageSelect.value || "en";
+
+      if (!customerId) {
+        setError("Please enter a valid Customer ID first.");
+        customerIdInput.focus();
+        return;
+      }
+
+      if (!message) {
+        setError("Please type your question or describe the issue.");
+        userMessageInput.focus();
+        return;
+      }
+
+      isSending = true;
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = '<span class="icon">⏳</span>';
+
+      addMessageBubble({ text: message, from: "user", ts: new Date() });
+
+      const formData = new FormData();
+      formData.append("customerId", customerId);
+      formData.append("message", message);
+      formData.append("language", language);
+
+      if (attachedFile) {
+        formData.append("image", attachedFile);
+      }
+
+      try {
+        const resp = await fetch("http://127.0.0.1:8000/detect", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!resp.ok) {
+          setBackendOnline(false);
+          const text = await resp.text();
+          console.error("Backend error:", text);
+          setError("Backend error. Please check the FastAPI server logs.");
+          return;
+        } else {
+          setBackendOnline(true);
+        }
+
+        const data = await resp.json();
+        const answer = data.answer || "No response from assistant.";
+
+        addMessageBubble({ text: answer, from: "bot", ts: new Date() });
+
+        // Speak if toggle is on
+        if (voiceReplyToggle.checked) {
+          speakText(answer, language);
+        }
+
+        // Update customer/vehicle labels if backend returned them
+        if (data.customerName) {
+          currentCustomerName = data.customerName;
+          customerNameLabel.textContent = currentCustomerName;
+        }
+        if (data.customerId) {
+          customerIdLabel.textContent = data.customerId;
+        } else {
+          customerIdLabel.textContent = customerId;
+        }
+        if (Array.isArray(data.vehicles)) {
+          currentVehicles = data.vehicles;
+          vehicleCountLabel.textContent = String(data.vehicles.length);
+
+          if (data.vehicles.length === 0) {
+            vehicleDetailsLabel.textContent = "No vehicles were found for this customer.";
+          } else if (data.vehicles.length === 1) {
+            const v = data.vehicles[0];
+            vehicleDetailsLabel.textContent = `${v.year} ${v.brand} ${v.model}`;
+          } else {
+            const preview = data.vehicles
+              .slice(0, 3)
+              .map((v) => `${v.year} ${v.brand} ${v.model}`)
+              .join(" · ");
+            vehicleDetailsLabel.textContent = preview + (data.vehicles.length > 3 ? " …" : "");
+          }
+        }
+
+        userMessageInput.value = "";
+        userMessageInput.focus();
+      } catch (err) {
+        console.error(err);
+        setBackendOnline(false);
+        setError("Could not reach backend. Is FastAPI running on port 8000?");
+      } finally {
+        isSending = false;
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = '<span class="icon">➤</span>';
+      }
+    }
+
+    // Event handlers
+    sendBtn.addEventListener("click", sendMessage);
+
+    userMessageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    attachBtn.addEventListener("click", () => {
+      fileInput.click();
+    });
+
+    cameraBtn.addEventListener("click", () => {
+      // Hints the browser to open camera on mobile; on desktop still opens picker
+      fileInput.setAttribute("capture", "environment");
+      fileInput.click();
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/")) {
+        setError("Please select an image file.");
+        fileInput.value = "";
+        attachedFile = null;
+        imagePreviewRow.classList.add("hidden");
+        return;
+      }
+      setError("");
+      attachedFile = file;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imagePreviewRow.classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+    });
+
+    removeImageBtn.addEventListener("click", () => {
+      attachedFile = null;
+      fileInput.value = "";
+      imagePreviewRow.classList.add("hidden");
+    });
+
+    if (recognition) {
+      micBtn.addEventListener("click", () => {
+        if (recognizing) {
+          recognition.stop();
+        } else {
+          recognition.lang = languageSelect.value === "ar" ? "ar-SA" : "en-US";
+          recognition.start();
+        }
+      });
+    } else {
+      micBtn.addEventListener("click", () => {
+        alert("Speech recognition is not supported in this browser.");
+      });
+    }
+
+    themeToggle.addEventListener("click", () => {
+      document.body.classList.toggle("dark");
+    });
+
+    chips.forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const text = chip.getAttribute("data-example");
+        userMessageInput.value = text;
+        userMessageInput.focus();
+      });
+    });
+
+    // Initial state
+    setBackendOnline(true);
+  </script>
+</body>
+</html>

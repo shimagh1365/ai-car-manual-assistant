@@ -1,0 +1,24 @@
+{
+  "customerId": "DUMMY",
+  "customerName": "Ahmed Al-Mansoori",
+  "vehicles": [
+    {
+      "vehicleId": "VH001",
+      "brand": "Toyota",
+      "model": "Camry",
+      "year": 2020
+    },
+    {
+      "vehicleId": "VH002",
+      "brand": "Honda",
+      "model": "Civic",
+      "year": 2019
+    },
+    {
+      "vehicleId": "VH003",
+      "brand": "Audi",
+      "model": "A4",
+      "year": 2021
+    }
+  ]
+}

@@ -1,102 +1,135 @@
-import os
-import json
-from openai import OpenAI
+# agent.py
+import re
+from typing import List, Dict, Any
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# -----------------------------------------------------------
-# The ONLY function responsible for multi-vehicle selection
-# -----------------------------------------------------------
-async def select_vehicle_via_llm(user_message: str, vehicles: list):
+async def select_vehicle_via_llm(user_message: str, vehicles: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Uses LLM to interpret user intent and select a vehicle.
+    Deterministic vehicle selector.
+    Handles:
+      - "the 2026 one", "the 2017 car"
+      - "the newer one", "the older one"
+      - "the latest", "the previous model"
+      - "the Skoda", "the MG", "the Audi"
+      - "the first one", "the second one"
+      - raw ID: "selected_vehicle_id:60039" or "60039"
+
     Returns:
-        { "needClarification": True, "options": [...] }
-        OR
-        { "vehicleId": "12345" }
+        {"vehicleId": "<id>"}       - when confident
+        {"needClarification": True} - when ambiguous
     """
 
-    # 1. FAST PATH: Legacy strict ID check (Frontend clickable buttons)
-    # Checks if the exact string 'selected_vehicle_id' is present
-    if "selected_vehicle_id" in user_message.lower():
-        # clean up the string to find the ID numbers
-        import re
-        # Extract digits after the colon or equals sign
-        match = re.search(r'selected_vehicle_id[:=]\s*(\w+)', user_message)
-        if match:
-            extracted_id = match.group(1)
-            # Verify this ID actually exists in our list
-            for v in vehicles:
-                if str(v["vehicleId"]) == extracted_id:
-                    return {"vehicleId": v["vehicleId"]}
+    # Normalize the input
+    msg = (user_message or "").strip().lower()
 
-    # 2. INTELLIGENT PATH: LLM JSON Selection
-    
-    # Create a clean JSON structure for the LLM to analyze
-    # We strip out irrelevant data to save tokens and reduce confusion
-    vehicle_options = []
+    # If user said nothing → ask again
+    if not msg:
+        return {"needClarification": True, "options": vehicles}
+
+    # Helper to safely get integer year from vehicle data
+    def get_year_int(v):
+        try:
+            return int(v.get("year", 0))
+        except:
+            return 0
+
+    # ----------------------------------------------------
+    # 1) DIRECT selected_vehicle_id:XXXX
+    # ----------------------------------------------------
+    m = re.search(r"selected_vehicle_id[:=\s]*([a-zA-Z0-9_]+)", msg)
+    if m:
+        chosen = m.group(1)
+        for v in vehicles:
+            if str(v["vehicleId"]).lower() == chosen.lower():
+                return {"vehicleId": v["vehicleId"]}
+
+    # ----------------------------------------------------
+    # 2) Raw vehicle ID in user message
+    # ----------------------------------------------------
     for v in vehicles:
-        vehicle_options.append({
-            "id": str(v["vehicleId"]),
-            "description": f"{v['year']} {v['brand']} {v['model']}"
-        })
+        if str(v["vehicleId"]).lower() in msg:
+            return {"vehicleId": v["vehicleId"]}
 
-    system_prompt = f"""
-    You are an intelligent intent classifier for a car support bot.
-    
-    TASK:
-    Analyze the USER INPUT and match it to one of the AVAILABLE VEHICLES.
-    
-    AVAILABLE VEHICLES:
-    {json.dumps(vehicle_options, indent=2)}
-    
-    RULES:
-    1. Identify which car the user is talking about based on Model, Year, or relative terms (e.g., "the newer one", "the MG").
-    2. If the user says "the newer one", compare the years.
-    3. If the user says "the first one", look at the list order.
-    4. If the input is vague (e.g., "my car") and there are multiple options, return null.
-    5. Return JSON format ONLY.
-    
-    OUTPUT FORMAT:
-    {{ "selected_vehicle_id": "THE_ID_HERE" }} 
-    OR 
-    {{ "selected_vehicle_id": null }}
-    """
+    # ----------------------------------------------------
+    # 3) Year-based resolution ("2026 one", "2025 car")
+    # ----------------------------------------------------
+    years_in_text = re.findall(r"\b(19\d{2}|20\d{2})\b", msg)
+    if years_in_text:
+        try:
+            target_year = int(years_in_text[-1])
+            # Compare strictly as integers
+            candidates = [v for v in vehicles if get_year_int(v) == target_year]
+            
+            if len(candidates) == 1:
+                return {"vehicleId": candidates[0]["vehicleId"]}
+        except:
+            pass
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o", # Use GPT-4o or 4o-mini for better logic reasoning
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            response_format={ "type": "json_object" }, # FORCE JSON
-            temperature=0.0, # Strict logic, no creativity
-        )
-        
-        # Parse the clean JSON
-        result_content = response.choices[0].message.content
-        result_json = json.loads(result_content)
-        
-        selected_id = result_json.get("selected_vehicle_id")
+    # ----------------------------------------------------
+    # 4) NEWER / OLDER logic
+    # ----------------------------------------------------
+    # Get list of valid years
+    valid_years = [get_year_int(v) for v in vehicles if get_year_int(v) > 0]
+    
+    newest_year = max(valid_years) if valid_years else None
+    oldest_year = min(valid_years) if valid_years else None
 
-        if selected_id:
-            # Double check the ID actually exists in our original list
-            # (Prevents hallucinated IDs)
-            for v in vehicles:
-                if str(v["vehicleId"]) == str(selected_id):
-                    return {"vehicleId": v["vehicleId"]}
-        
-        # If null or invalid ID, fall through to clarification
-        return {
-            "needClarification": True,
-            "options": vehicles
-        }
+    newer_terms = [
+        "newer", "new one", "latest", "new model", "new car",
+        "second one", "the newer car", "the latest car", "the latest one",
+        "more recent", "recent model"
+    ]
+    older_terms = [
+        "older", "old one", "previous", "the older car",
+        "first one", "the old one", "earlier model", "older model"
+    ]
 
-    except Exception as e:
-        print(f"Error in select_vehicle_via_llm: {e}")
-        # Fallback to clarification if AI fails
-        return {
-            "needClarification": True,
-            "options": vehicles
-        }
+    if any(term in msg for term in newer_terms) and newest_year is not None:
+        for v in vehicles:
+            if get_year_int(v) == newest_year:
+                return {"vehicleId": v["vehicleId"]}
+
+    if any(term in msg for term in older_terms) and oldest_year is not None:
+        for v in vehicles:
+            if get_year_int(v) == oldest_year:
+                return {"vehicleId": v["vehicleId"]}
+
+    # ----------------------------------------------------
+    # 5) Brand / model keyword matching
+    # ----------------------------------------------------
+    brand_candidates = []
+
+    for v in vehicles:
+        brand = str(v.get("brand") or "").lower()
+        model = str(v.get("model") or "").lower()
+
+        match = False
+
+        # brand match
+        if brand and brand in msg:
+            match = True
+
+        # token-level model match (“mg7”, “octavia”, “q7”)
+        for token in re.findall(r"[a-z0-9]+", model):
+            if len(token) > 1 and token in msg:
+                match = True
+                break
+
+        if match:
+            brand_candidates.append(v)
+
+    if len(brand_candidates) == 1:
+        return {"vehicleId": brand_candidates[0]["vehicleId"]}
+
+    # ----------------------------------------------------
+    # 6) Ordinals ("first car", "second car")
+    # ----------------------------------------------------
+    if len(vehicles) >= 2:
+        if "first" in msg or "1st" in msg:
+            return {"vehicleId": vehicles[0]["vehicleId"]}
+        if "second" in msg or "2nd" in msg:
+            return {"vehicleId": vehicles[1]["vehicleId"]}
+
+    # ----------------------------------------------------
+    # 7) If nothing worked → ask them again
+    # ----------------------------------------------------
+    return {"needClarification": True, "options": vehicles}

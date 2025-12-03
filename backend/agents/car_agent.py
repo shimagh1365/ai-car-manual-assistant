@@ -4,27 +4,25 @@ from rag.manual_search import search_manual
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Root path for manuals
 MANUAL_ROOT = os.path.join("backend", "manuals", "ali-and-sons")
 
 # ---------------------------------------------------------
-# CONSTANTS FOR COST SAVING
+# COST SAVING: Chit-Chat Detection
 # ---------------------------------------------------------
-# If user says these, DO NOT search the manual.
 CHIT_CHAT_PHRASES = [
-    "hi", "hello", "hey", "hola", "greetings", 
-    "thanks", "thank you", "thx", "ok", "okay", 
-    "bye", "goodbye", "cool", "great"
+    "hi", "hello", "hey", "greetings", "salaam", 
+    "thanks", "thank you", "ok", "okay", "cool", 
+    "bye", "goodbye", "start", "restart"
 ]
 
 def find_best_manual_key(brand: str, model: str, year: int | str | None):
-    # (Keep this function exactly the same as before)
     if not brand: return None
     brand_clean = str(brand).lower().strip()
     model_clean = str(model or "").lower().strip()
     year_str = str(year or "").strip()
     
     if not os.path.exists(MANUAL_ROOT): return None
-    
     found_brand_folder = None
     for folder_name in os.listdir(MANUAL_ROOT):
         if folder_name.lower() == brand_clean:
@@ -33,6 +31,7 @@ def find_best_manual_key(brand: str, model: str, year: int | str | None):
     if not found_brand_folder: return None
 
     pdf_files = [f.replace(".pdf", "") for f in os.listdir(found_brand_folder) if f.lower().endswith(".pdf")]
+    
     best_match = None
     best_score = 0
 
@@ -48,54 +47,50 @@ def find_best_manual_key(brand: str, model: str, year: int | str | None):
     return best_match if best_score > 0 else None
 
 
+# =====================================================================
+# MAIN AGENT
+# =====================================================================
 async def run_car_agent_rag(
     message: str,
     vehicle_data: dict,
     image_base64: str | None = None,
     language: str = "en",
     first_name: str = "Customer",
-    session_id: str = "default",
+    session_id: str = "",
     chat_history: list = [],
-    prevent_greeting: bool = False, 
+    prevent_greeting: bool = False,
+    promo_code: str = "VIP-GUEST",
     **kwargs,
 ) -> str:
 
-    # 1. Setup Data
-    brand = vehicle_data.get("brand", "Unknown Brand")
-    model = vehicle_data.get("model", "Unknown Model")
-    year = vehicle_data.get("year", "Unknown Year")
-    full_vehicle_name = f"{year} {brand} {model}"
+    # 1. Setup Vehicle Info
+    brand = vehicle_data.get("brand", "Unknown")
+    model = vehicle_data.get("model", "Unknown")
+    year = vehicle_data.get("year", "")
+    full_vehicle_name = f"{year} {brand} {model}".strip()
 
-    # ---------------------------------------------------------
-    # COST OPTIMIZATION 1: SKIP MANUAL ON CHIT-CHAT
-    # ---------------------------------------------------------
-    should_search_manual = True
-    clean_msg = message.strip().lower()
-    
-    # If message is short and in chit-chat list, skip manual
-    if len(clean_msg) < 15 and clean_msg in CHIT_CHAT_PHRASES:
-        should_search_manual = False
-    
-    # If searching about ownership
-    if "which car" in clean_msg or "what car" in clean_msg:
-        should_search_manual = False
-
-    # 2. Search Manual (Only if needed)
-    vehicle_key = find_best_manual_key(brand, model, year)
+    # 2. Define Search Query
     search_query = message 
     if not search_query and image_base64:
-        search_query = "Identify this car part and maintenance"
+        search_query = "Identify this car part, warning light, or issue."
 
+    # 3. Cost Optimization
+    should_search = True
+    clean_msg = message.strip().lower()
+    if len(clean_msg) < 15 and clean_msg in CHIT_CHAT_PHRASES:
+        should_search = False
+
+    # 4. Perform RAG Search
     manual_chunks = []
-    rag_context = ""
+    vehicle_key = find_best_manual_key(brand, model, year)
 
-    if should_search_manual and vehicle_key and search_query and len(search_query) > 2:
+    if should_search and vehicle_key and len(search_query) > 2:
         try:
             manual_chunks = search_manual(
                 brand=str(brand).lower(),
                 vehicle_key=vehicle_key,
                 question=search_query,
-                top_k=4, 
+                top_k=5, 
             )
         except:
             manual_chunks = []
@@ -103,68 +98,103 @@ async def run_car_agent_rag(
     if manual_chunks:
         rag_context = "\n\n".join(f"[Page {ch.get('page', '?')}] {ch.get('text', '')}" for ch in manual_chunks)
     else:
-        # If we skipped search, explicitly leave context empty
-        rag_context = ""
+        rag_context = f"No specific manual section found. Use general knowledge about {brand} vehicles."
 
-    # 3. History
+    # 5. Format Chat History
     formatted_history = ""
     if chat_history:
-        recent_history = chat_history[-6:] 
-        formatted_history = "PREVIOUS CHAT:\n" + "\n".join(f"{msg['role'].upper()}: {msg['content']}" for msg in recent_history)
+        recent = chat_history[-6:]
+        formatted_history = "HISTORY:\n" + "\n".join(f"{msg['role']}: {msg['content']}" for msg in recent)
 
-    # 4. Greeting Logic
-    if not chat_history and not prevent_greeting:
-        greeting_instruction = f"Start explicitly by welcoming {first_name} and mentioning their vehicle ({full_vehicle_name})."
+    # 6. Greeting Instruction Logic
+    if chat_history:
+        greeting_rule = "Do NOT greet. Do NOT mention the car name again. Go straight to the answer/next step."
     elif prevent_greeting:
-        greeting_instruction = f"Do NOT say 'Hello'. Start by simply confirming the car: 'Okay, regarding the {full_vehicle_name}, let's check that...'"
+        greeting_rule = f"Do NOT say 'Hello'. Start by confirming: 'Okay, regarding the {full_vehicle_name}, let's check that...'"
     else:
-        greeting_instruction = "Do NOT greet the user again. Go straight to the answer."
+        greeting_rule = f"Start by explicitly welcoming {first_name} and mentioning their {full_vehicle_name}."
 
-    # ---------------------------------------------------------
-    # COST OPTIMIZATION 2: MODEL SELECTION
-    # ---------------------------------------------------------
-    # Use GPT-4o ONLY if there is an image (Vision required).
-    # Use GPT-4o-mini for text (30x Cheaper).
-    selected_model = "gpt-4o-mini" 
-    if image_base64:
-        selected_model = "gpt-4o"
-
-    # System Prompt
+    # 7. System Prompt - SMART TRIAGE & PREVENTATIVE UPSELL
     system_prompt = f"""
-You are an expert Car Service Advisor for Ali & Sons.
+You are an expert **Certified {brand} Service Advisor** at Ali & Sons.
+You are NOT a generic AI. You are a specialist for the **{full_vehicle_name}**.
 
-CURRENT USER VEHICLE: {full_vehicle_name}
-Language: {language}
-Context from Manual: {rag_context}
+**YOUR SUPERPOWER:**
+You possess a detailed mental map of the **{full_vehicle_name}**'s interior cockpit. 
+When guiding the user, do not just list steps. **Visualize the driver's seat** and guide their hand to the exact location of the buttons.
+{rag_context}
 
 {formatted_history}
 
-CRITICAL RULES:
-1. **Greeting**: {greeting_instruction}
-2. **Interactive Mode**: Give ONLY the first logical troubleshooting step.
-3. **Simple Language**: Explain like you are talking to a non-expert.
-4. **Safety**: If context is empty, give general safe advice.
-5. **Context**: If 'Context from Manual' is empty, answer using your general automotive knowledge.
+=========================================
+PHASE 1: INTELLIGENT TRIAGE (CLASSIFY FIRST)
+=========================================
+Before answering, determine the severity:
+
+1. **LEVEL 1 (Settings & Simple Consumables):** 
+   - Examples: Bluetooth, Phone pairing, Wipers, Audio settings, Mirror folding, Tire pressure refill.
+   - *Strategy:* Be patient. Guide them through **up to 5 steps**.
+
+2. **LEVEL 2 (Moderate Mechanical):** 
+   - Examples: AC blowing warm, Battery dead, Squeaky brakes, Vibrations, Fuse replacement.
+   - *Strategy:* Be cautious. Suggest **MAXIMUM 3 basic checks** (e.g. Fuses, Fluid levels).
+   - If those 3 checks fail, **STOP immediately** and push for booking.
+
+3. **LEVEL 3 (Critical/Dangerous):** 
+   - Examples: Smoke, Burning smell, Transmission slipping, Major leaks, Flashing Engine Light, Airbags.
+   - *Strategy:* **IMMEDIATE STOP.** Do not offer DIY fixes. Explain the danger (Safety First) and demand a booking.
+
+=========================================
+PHASE 2: THE "GIVE UP" LOGIC
+=========================================
+- Look at the chat history. Have you reached the step limit for the Severity Level above?
+- If YES (or if user replied "no" multiple times):
+  - Stop guessing.
+  - **SAY:** "We have checked the basics. Since the issue persists, this indicates a complex internal fault with the {full_vehicle_name} that requires specialized diagnostics."
+  - **OFFER:** "To help, I've generated a Priority Voucher **{promo_code}** for getting a preferential rates diagnostics at Ali & Sons."
+  - **TRIGGER:** Append [ACTION:BOOK]
+
+=========================================
+PHASE 3: THE "PREVENTATIVE" UPSELL (If Solved)
+=========================================
+- If the user says "It worked", "Fixed", or "Thanks":
+  - **Do NOT just say goodbye.**
+  - **SAY:** "Great job! However, since this issue occurred, it might be a symptom of a larger wear-and-tear issue. To ensure your {brand} stays in peak condition, I recommend a quick health check at Ali & Sons."
+  - **TRIGGER:** Append [ACTION:BOOK] (This is optional but recommended).
+
+=========================================
+GENERAL RULES
+=========================================
+- **Brand Authority:** Always mention "Ali & Sons specialized {brand} tools" if the issue is complex.
+- **Booking Protocol:** Never ask for dates/times. Just say "Please use the button below." and append [ACTION:BOOK].
+- **Style:** One step at a time. Ask "Did that work?".
+
+5. **Greeting Rule**: {greeting_rule}
 
 User Query: "{search_query}"
 """
 
-    messages = [{"role": "system", "content": system_prompt}]
-    
+    # 8. Model Selection
     if image_base64:
+        selected_model = "gpt-4o"
         user_content = [
             {"type": "text", "text": message or "Analyze this image."},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
         ]
-        messages.append({"role": "user", "content": user_content})
     else:
-        messages.append({"role": "user", "content": message})
+        selected_model = "gpt-4o-mini"
+        user_content = message
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
 
     response = client.chat.completions.create(
         model=selected_model,
         messages=messages,
-        temperature=0.3, 
-        max_tokens=300, 
+        max_tokens=450,
+        temperature=0.3,
     )
 
     return response.choices[0].message.content

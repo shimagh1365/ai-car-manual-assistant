@@ -3,18 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from agents.car_agent import run_car_agent_rag
 from agent import select_vehicle_via_llm
 from dotenv import load_dotenv
-from typing import Any, List, Dict, Optional
+import httpx
 import json
 import base64
 import os
-import httpx
+import uuid
+import time
+import traceback
+from typing import Optional, Dict, List
 
-# ---------------------------------------------------------
-# SETUP
-# ---------------------------------------------------------
 load_dotenv()
+
 app = FastAPI()
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,73 +25,89 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------
-# SESSION STORAGE
-# ---------------------------------------------------------
-SESSION_SELECTED_VEHICLE = {}
-SESSION_HISTORY: Dict[str, List[Dict[str, str]]] = {}
-SESSION_PENDING_QUERY = {} 
-SESSION_CUSTOMER_MAP = {}
+# ------------------------------------------------------------------------------------
+# SESSION MEMORY
+# ------------------------------------------------------------------------------------
+SESSION_DATA: Dict[str, Dict] = {}
+SESSION_TTL_SECONDS = 600
 
-# ---------------------------------------------------------
-# AUTH & DATA FETCHING
-# ---------------------------------------------------------
-API_BASE = "https://quantum.ali-sons.com/api"
+def get_session(session_id: Optional[str]):
+    now = time.time()
+    if not session_id or session_id == "" or session_id == "null":
+        session_id = str(uuid.uuid4())
+
+    session = SESSION_DATA.get(session_id)
+
+    if not session:
+        SESSION_DATA[session_id] = {
+            "created_at": now,
+            "vehicle": None,
+            "history": [],
+            "customerId": None,
+            "first_greeting_sent": False,
+            "pending_query": None,
+            "pending_image": None
+        }
+        return session_id, SESSION_DATA[session_id]
+
+    if now - session["created_at"] > SESSION_TTL_SECONDS:
+        SESSION_DATA[session_id] = {
+            "created_at": now,
+            "vehicle": None,
+            "history": [],
+            "customerId": None,
+            "first_greeting_sent": False,
+            "pending_query": None,
+            "pending_image": None
+        }
+
+    return session_id, SESSION_DATA[session_id]
+
+# ------------------------------------------------------------------------------------
+# AUTH & DATA
+# ------------------------------------------------------------------------------------
+API_BASE = os.getenv("CUSTOMER_API_BASE")
+if API_BASE.endswith("/"):
+    API_BASE = API_BASE[:-1]
+
 AUTH_URL = f"{API_BASE}/api/auth/login"
 CUSTOMER_URL = f"{API_BASE}/api/Quantum/customervehicles"
 
 async def fetch_auth_token():
+    def clean(val):
+        return str(val).strip().replace('"', '').replace("'", "")
+
     payload = {
-        "strDomain": os.getenv("AUTH_DOMAIN", "standarduser"),
-        "strUsername": os.getenv("AUTH_USER", "system_user@ali-sons.com"),
-        "strPassword": os.getenv("AUTH_PASS", "a33dn@hghda3"),
+        "strDomain": clean(os.getenv("AUTH_DOMAIN")),
+        "strUsername": clean(os.getenv("AUTH_USER")),
+        "strPassword": clean(os.getenv("AUTH_PASS")),
     }
     
     async with httpx.AsyncClient(timeout=15, verify=False) as client:
-        resp = await client.post(AUTH_URL, json=payload)
-        resp.raise_for_status()
-        return resp.json()["accessToken"]
+        r = await client.post(AUTH_URL, json=payload)
+        r.raise_for_status()
+        return r.json()["accessToken"]
 
 async def get_customer_data(customerId: str):
-    # DUMMY MODE
-    if customerId == "DUMMY":
-        try:
-            return json.load(open("dummy_data.json", "r", encoding="utf-8"))
-        except FileNotFoundError:
-            return {"vehicles": [], "customerName": "Test User"}
+    token = await fetch_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    customerId = customerId.zfill(10)
 
-    try:
-        token = await fetch_auth_token()
-        headers = {"Authorization": f"Bearer {token}"}
-        
-        clean_id = customerId.strip()
-        if clean_id.isdigit() and len(clean_id) < 10:
-            clean_id = clean_id.zfill(10)
-            
-        params = {"customerId": clean_id}
-
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
-            resp = await client.get(CUSTOMER_URL, headers=headers, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            
-    except Exception as e:
-        print(f"API Error: {e}")
-        return {"vehicles": [], "customerName": "Error fetching data"}
+    async with httpx.AsyncClient(timeout=15, verify=False) as client:
+        r = await client.get(CUSTOMER_URL, headers=headers, params={"customerId": customerId})
+        r.raise_for_status()
+        data = r.json()
 
     vehicles = []
-    for index, v in enumerate(data.get("vehicles", [])):
-        v_id = v.get("Vehicle_ID", "")
-        if not v_id: v_id = f"TEMP_ID_{index}" 
-            
-        year_val = v.get("Vehicle_Model_Year", "").strip()
-        try:
-            year_val = int(year_val)
-        except:
-            year_val = ""
+    for idx, v in enumerate(data.get("vehicles", [])):
+        raw_year = v.get("Vehicle_Model_Year", "")
+        if raw_year and str(raw_year).strip().lower() != "null":
+            year_val = str(raw_year).strip()
+        else:
+            year_val = "" 
 
         vehicles.append({
-            "vehicleId": v_id,
+            "vehicleId": v.get("Vehicle_ID") or f"TMP_{idx}",
             "brand": v.get("Vehicle_Brand", ""),
             "model": v.get("Vehicle_Model_Description", ""),
             "year": year_val,
@@ -102,130 +120,151 @@ async def get_customer_data(customerId: str):
         "vehicles": vehicles
     }
 
-def extract_first_name(full_name: str) -> str:
-    if not full_name: return "there"
-    return full_name.split(" ")[0].strip()
+def first_name(name: str):
+    if not name: return "there"
+    return name.split(" ")[0].strip()
 
-# ---------------------------------------------------------
+# ------------------------------------------------------------------------------------
 # MAIN ENDPOINT
-# ---------------------------------------------------------
+# ------------------------------------------------------------------------------------
 @app.post("/detect")
 async def detect_issue(
     customerId: str = Form(...),
     message: str = Form(""),
     image: Optional[UploadFile] = File(None),
     language: str = Form("en"),
-    session_id: str = Form("default")
+    session_id: Optional[str] = Form(None)
 ):
-    # 1. Check & Reset Session if ID changed
-    clean_incoming_id = customerId.strip()
-    if clean_incoming_id.isdigit() and len(clean_incoming_id) < 10:
-        clean_incoming_id = clean_incoming_id.zfill(10)
-
-    previous_customer_id = SESSION_CUSTOMER_MAP.get(session_id)
-    if previous_customer_id and previous_customer_id != clean_incoming_id:
-        if session_id in SESSION_SELECTED_VEHICLE: del SESSION_SELECTED_VEHICLE[session_id]
-        if session_id in SESSION_HISTORY: del SESSION_HISTORY[session_id]
-        if session_id in SESSION_PENDING_QUERY: del SESSION_PENDING_QUERY[session_id]
-
-    SESSION_CUSTOMER_MAP[session_id] = clean_incoming_id
-
-    # 2. Fetch Data
-    customer_data = await get_customer_data(clean_incoming_id)
-    vehicles = customer_data.get("vehicles", [])
-    first_name = extract_first_name(customer_data.get("customerName", ""))
-
-    if not vehicles:
-        return {"answer": f"Welcome {first_name}. I couldn't find any vehicles linked to ID {clean_incoming_id}."}
-
-    vehicle = None
-    just_selected_now = False 
-
-    # 3. Car Selection Logic
-    if session_id in SESSION_SELECTED_VEHICLE:
-        if "switch car" in message.lower() or "change car" in message.lower():
-            del SESSION_SELECTED_VEHICLE[session_id]
-            vehicle = None 
-        else:
-            vehicle = SESSION_SELECTED_VEHICLE[session_id]
+    session_id, session = get_session(session_id)
     
-    elif len(vehicles) == 1:
-        vehicle = vehicles[0]
-        SESSION_SELECTED_VEHICLE[session_id] = vehicle
-    
-    else:
-        selection = await select_vehicle_via_llm(message, vehicles)
-        
-        if selection.get("needClarification", False):
-            if len(message) > 5 and "202" not in message and "switch" not in message: 
-                SESSION_PENDING_QUERY[session_id] = message
+    try:
+        data = await get_customer_data(customerId)
+    except Exception as e:
+        print("\n\n!!!!!!!!!! API CONNECTION FAILED !!!!!!!!!!")
+        print(f"Error: {str(e)}")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n")
+        return {"answer": f"System Error: Could not fetch customer data. ({str(e)})", "session_id": session_id}
 
-            car_list_text = "\n".join([f"- {v['year']} {v['brand']} {v['model']}" for v in vehicles])
-            return {
-                "answer": (
-                    f"Welcome back, {first_name}. I see multiple vehicles. Which one is this about?\n\n"
-                    f"{car_list_text}\n\n"
-                    "You can say 'the Skoda' or 'the 2017 one'."
-                )
-            }
+    vehicles = data["vehicles"]
+    fname = first_name(data["customerName"])
 
-        selected_id = selection.get("vehicleId")
-        vehicle = next((v for v in vehicles if str(v["vehicleId"]) == str(selected_id)), None)
-        
-        if vehicle:
-            SESSION_SELECTED_VEHICLE[session_id] = vehicle
-            just_selected_now = True
-        else:
-            car_list_text = "\n".join([f"- {v['year']} {v['brand']} {v['model']}" for v in vehicles])
-            return {"answer": f"I didn't catch that. Please select one:\n\n{car_list_text}"}
+    if session["customerId"] != data["customerId"]:
+        session["created_at"] = time.time()
+        session["vehicle"] = None
+        session["history"] = []
+        session["first_greeting_sent"] = False
+        session["pending_query"] = None
+        session["pending_image"] = None
+        session["customerId"] = data["customerId"]
 
-    # 4. Restore Pending Query
     image_base64 = None
-    if image and image.filename:
-        file_bytes = await image.read()
-        image_base64 = base64.b64encode(file_bytes).decode("utf-8")
+    if image is not None and image.filename:
+        image_bytes = await image.read()
+        if image_bytes:
+            image_base64 = base64.b64encode(image_bytes).decode()
 
-    final_message_to_process = message
-    if just_selected_now and not image_base64:
-        pending = SESSION_PENDING_QUERY.get(session_id)
-        if pending:
-            final_message_to_process = pending
-            del SESSION_PENDING_QUERY[session_id]
-        else:
+    # -------------------------------------------------------------------------------
+    # VEHICLE SELECTION
+    # -------------------------------------------------------------------------------
+    if len(vehicles) == 0:
+        return {"answer": f"Hello {fname}. No vehicles found for ID {customerId}.", "session_id": session_id}
+
+    if len(vehicles) == 1:
+        session["vehicle"] = vehicles[0]
+
+    elif session["vehicle"] is None:
+        selection = await select_vehicle_via_llm(message, vehicles)
+
+        if selection.get("needClarification"):
+            # 1. Define Chit-Chat Greetings
+            greetings = ["hi", "hello", "hey", "hola", "salam", "good morning", "good evening"]
+            user_input_lower = message.strip().lower()
+            
+            # 2. Build Choices
+            choices = "\n".join([f"- {v['year']} {v['brand']} {v['model']}" for v in vehicles])
+
+            # 3. Save Context
+            if len(message.strip()) > 1 and user_input_lower not in greetings and "202" not in message:
+                session["pending_query"] = message
+            
+            if image_base64:
+                session["pending_image"] = image_base64
+
+            # 4. Dynamic Response (Greeting vs Issue)
+            if user_input_lower in greetings:
+                # --- UPDATED: REMOVED "WELCOME BACK" ---
+                final_answer = (
+                    f"Hello {fname}. I see you have a few vehicles with us. Which one can I assist you with today?\n\n{choices}"
+                )
+            else:
+                final_answer = (
+                    f"I can certainly help you with that, {fname}. "
+                    f"To give you the correct advice, could you confirm which vehicle is experiencing this issue?\n\n{choices}"
+                )
+
             return {
-                "answer": f"Okay, I've selected the {vehicle['year']} {vehicle['model']}. What issue are you facing?",
-                "vehicle_info": vehicle
+                "answer": final_answer,
+                "session_id": session_id,
+                "customerName": data["customerName"], 
+                "customerId": data["customerId"],
+                "vehicles": vehicles
             }
 
-    # 5. Run Agent with PREVENT_GREETING flag
-    chat_history = SESSION_HISTORY.get(session_id, [])
+        selected_id = selection["vehicleId"]
+        session["vehicle"] = next(v for v in vehicles if str(v["vehicleId"]) == str(selected_id))
 
+        if session.get("pending_query"):
+            message = session["pending_query"]
+            session["pending_query"] = None
+        
+        if session.get("pending_image") and image_base64 is None:
+            image_base64 = session["pending_image"]
+            session["pending_image"] = None
+        
+        session["first_greeting_sent"] = True
+
+    vehicle = session["vehicle"]
+    
+    prevent_greeting = session["first_greeting_sent"]
+    session["first_greeting_sent"] = True
+
+    # -------------------------------------------------------------------------------
+    # GENERATE PROMO
+    # -------------------------------------------------------------------------------
+    cid_str = str(data["customerId"])
+    short_id = cid_str[-5:] if len(cid_str) > 5 else cid_str
+    promo_code = f"AS-{short_id}-VIP"
+
+    # -------------------------------------------------------------------------------
+    # RUN AGENT
+    # -------------------------------------------------------------------------------
     answer = await run_car_agent_rag(
-        message=final_message_to_process,
+        message=message,
         vehicle_data=vehicle,
         image_base64=image_base64,
         language=language,
-        first_name=first_name,
+        first_name=fname,
         session_id=session_id,
-        chat_history=chat_history,
-        prevent_greeting=just_selected_now # <--- CRITICAL FIX: Pass True if we just selected the car
+        chat_history=session["history"],
+        prevent_greeting=prevent_greeting,
+        promo_code=promo_code
     )
 
-    # Save History
-    user_msg_content = "Image uploaded" if image_base64 else final_message_to_process
-    chat_history.append({"role": "user", "content": user_msg_content})
-    chat_history.append({"role": "assistant", "content": answer})
-    
-    if len(chat_history) > 20: chat_history = chat_history[-20:]
-    SESSION_HISTORY[session_id] = chat_history
+    session["history"].append({"role": "user", "content": message})
+    session["history"].append({"role": "assistant", "content": answer})
+    session["history"] = session["history"][-20:]
 
-    # ---------------------------------------------------------
-    # FINAL RETURN: Include all Context for the Frontend
-    # ---------------------------------------------------------
+    show_booking_btn = False
+    if "[ACTION:BOOK]" in answer:
+        show_booking_btn = True
+        answer = answer.replace("[ACTION:BOOK]", "").strip()
+
     return {
         "answer": answer,
-        "vehicle_info": vehicle,               # The specific car selected
-        "customerName": customer_data.get("customerName"), # <--- ADDED
-        "customerId": customer_data.get("customerId"),     # <--- ADDED
-        "vehicles": vehicles                               # <--- ADDED (The full list)
+        "vehicle_info": vehicle,
+        "customerName": data["customerName"], 
+        "customerId": data["customerId"],
+        "vehicles": vehicles,
+        "session_id": session_id,
+        "show_booking_button": show_booking_btn
     }
